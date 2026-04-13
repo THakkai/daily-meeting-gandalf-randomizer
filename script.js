@@ -137,9 +137,9 @@ function confirmSpeech() {
   log.unshift({ name: pendingConfirmation, date: formatDate(now), time: formatTime(now) });
 
   // Limit log to 10 entries
-  if (log.length > MAX_LOG_ENTRIES) {
-    log = log.slice(0, MAX_LOG_ENTRIES);
-  }
+  //if (log.length > MAX_LOG_ENTRIES) {
+  //  log = log.slice(0, MAX_LOG_ENTRIES);
+  //}
 
   // Deactivate the person who just spoke for the next draw
   //const personIndex = participants.findIndex(p => p.name === pendingConfirmation);
