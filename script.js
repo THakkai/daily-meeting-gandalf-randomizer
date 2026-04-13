@@ -142,10 +142,10 @@ function confirmSpeech() {
   }
 
   // Deactivate the person who just spoke for the next draw
-  const personIndex = participants.findIndex(p => p.name === pendingConfirmation);
-  if (personIndex !== -1) {
-    participants[personIndex].active = false;
-  }
+  //const personIndex = participants.findIndex(p => p.name === pendingConfirmation);
+  //if (personIndex !== -1) {
+  //  participants[personIndex].active = false;
+  //}
 
   save();
   renderLog();
