@@ -12,6 +12,9 @@ const firebaseConfig = {
 // Initialize Firebase
 let db;
 let logsCollection;
+let currentDrawDoc;
+
+const CURRENT_DRAW_DOC_ID = 'current_draw';
 
 function initFirebase() {
   try {
@@ -21,6 +24,7 @@ function initFirebase() {
     // Initialize Firestore
     db = firebase.firestore();
     logsCollection = db.collection('logs');
+    currentDrawDoc = db.collection('state').doc(CURRENT_DRAW_DOC_ID);
 
     console.log('Firebase initialized successfully');
     return true;
@@ -126,4 +130,63 @@ function subscribeToLogs(callback) {
     }, error => {
       console.error('Error subscribing to logs:', error);
     });
+}
+
+// ── Current Draw State Operations ──────────────────────────────────────────
+
+/**
+ * Save the current draw result to Firebase (pending confirmation)
+ * @param {string} name - The name of the person drawn
+ * @param {string} quote - The quote shown
+ * @returns {Promise<boolean>} Success status
+ */
+async function saveCurrentDraw(name, quote) {
+  try {
+    await currentDrawDoc.set({
+      name: name,
+      quote: quote,
+      timestamp: firebase.firestore.FieldValue.serverTimestamp()
+    });
+    console.log('Current draw saved to Firebase');
+    return true;
+  } catch (error) {
+    console.error('Error saving current draw:', error);
+    return false;
+  }
+}
+
+/**
+ * Clear the current draw state (after confirmation)
+ * @returns {Promise<boolean>} Success status
+ */
+async function clearCurrentDraw() {
+  try {
+    await currentDrawDoc.delete();
+    console.log('Current draw cleared from Firebase');
+    return true;
+  } catch (error) {
+    console.error('Error clearing current draw:', error);
+    return false;
+  }
+}
+
+/**
+ * Subscribe to real-time updates on the current draw state
+ * @param {Function} callback - Function to call when draw state changes
+ * @returns {Function} Unsubscribe function
+ */
+function subscribeToCurrentDraw(callback) {
+  return currentDrawDoc.onSnapshot(doc => {
+    if (doc.exists) {
+      const data = doc.data();
+      callback({
+        name: data.name,
+        quote: data.quote
+      });
+    } else {
+      callback(null);
+    }
+  }, error => {
+    console.error('Error subscribing to current draw:', error);
+  });
 }
