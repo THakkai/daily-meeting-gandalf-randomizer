@@ -13,13 +13,15 @@ const DEFAULT_PARTICIPANTS = [
 ];
 
 let participants = JSON.parse(localStorage.getItem(STORAGE_KEY_P) || 'null') || DEFAULT_PARTICIPANTS.map(p=>({...p}));
-let log = JSON.parse(localStorage.getItem(STORAGE_KEY_L) || '[]');
+let log = []; // Will be loaded from Firebase
 let pendingConfirmation = null; // Stores the name waiting for confirmation
+let firebaseInitialized = false;
 
 // ── Persistence ────────────────────────────────────────────────────────────
 function save() {
+  // Save participants to localStorage
   localStorage.setItem(STORAGE_KEY_P, JSON.stringify(participants));
-  localStorage.setItem(STORAGE_KEY_L, JSON.stringify(log));
+  // Logs are now saved to Firebase, not localStorage
 }
 
 // ── Tabs ───────────────────────────────────────────────────────────────────
@@ -130,11 +132,14 @@ function drawParticipant() {
 }
 
 // ── Confirmation ───────────────────────────────────────────────────────────
-function confirmSpeech() {
+async function confirmSpeech() {
   if (!pendingConfirmation) return;
 
   const now = new Date();
-  log.unshift({ name: pendingConfirmation, date: formatDate(now), time: formatTime(now) });
+  const newEntry = { name: pendingConfirmation, date: formatDate(now), time: formatTime(now) };
+
+  // Add to local log array first for immediate UI update
+  log.unshift(newEntry);
 
   // Limit log to 10 entries
   //if (log.length > MAX_LOG_ENTRIES) {
@@ -150,6 +155,11 @@ function confirmSpeech() {
   save();
   renderLog();
   renderParticipants();
+
+  // Save to Firebase
+  if (firebaseInitialized) {
+    await saveLogToFirebase(newEntry);
+  }
 
   document.getElementById('btnConfirm').style.display = 'none';
   pendingConfirmation = null;
@@ -238,8 +248,36 @@ function clearLog() {
   save();
   renderLog();
   renderParticipants(); // Update percentages
+
+  // Clear from Firebase
+  if (firebaseInitialized) {
+    clearLogsFromFirebase();
+  }
 }
 
 // ── Init ───────────────────────────────────────────────────────────────────
-renderParticipants();
-renderLog();
+async function initApp() {
+  // Initialize Firebase
+  firebaseInitialized = initFirebase();
+
+  if (firebaseInitialized) {
+    // Load logs from Firebase
+    log = await loadLogsFromFirebase();
+
+    // Subscribe to real-time updates
+    subscribeToLogs((updatedLogs) => {
+      log = updatedLogs;
+      renderLog();
+      renderParticipants(); // Update percentages
+    });
+  } else {
+    console.warn('Firebase not initialized. Using empty log.');
+  }
+
+  // Render initial UI
+  renderParticipants();
+  renderLog();
+}
+
+// Start the application
+initApp();
