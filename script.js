@@ -17,6 +17,8 @@ let log = []; // Will be loaded from Firebase
 let pendingConfirmation = null; // Stores the name waiting for confirmation
 let firebaseInitialized = false;
 let isDrawingLocally = false; // Flag to prevent showing own draw twice
+let lastDrawTimestamp = null; // Track the timestamp of the last draw we processed
+let isUpdatingFromFirebase = false; // Flag to prevent circular updates
 
 // ── Rate Limiting (Anti-bot protection) ────────────────────────────────────
 const RATE_LIMITS = {
@@ -54,8 +56,13 @@ function getRemainingCooldown(actionType) {
 
 // ── Persistence ────────────────────────────────────────────────────────────
 function save() {
-  // Save participants to localStorage
+  // Save participants to localStorage for offline access
   localStorage.setItem(STORAGE_KEY_P, JSON.stringify(participants));
+
+  // Also save to Firebase if initialized
+  if (firebaseInitialized && !isUpdatingFromFirebase) {
+    saveParticipantsToFirebase(participants);
+  }
   // Logs are now saved to Firebase, not localStorage
 }
 
@@ -350,6 +357,27 @@ async function initApp() {
   firebaseInitialized = initFirebase();
 
   if (firebaseInitialized) {
+    // Load participants from Firebase
+    const firebaseParticipants = await loadParticipantsFromFirebase();
+    if (firebaseParticipants.length > 0) {
+      participants = firebaseParticipants;
+    } else {
+      // If no participants in Firebase, save local ones
+      await saveParticipantsToFirebase(participants);
+    }
+
+    // Subscribe to real-time updates on participants
+    subscribeToParticipants((updatedParticipants) => {
+      // Only update if the change came from another user
+      if (JSON.stringify(updatedParticipants) !== JSON.stringify(participants)) {
+        isUpdatingFromFirebase = true;
+        participants = updatedParticipants;
+        localStorage.setItem(STORAGE_KEY_P, JSON.stringify(participants));
+        renderParticipants();
+        isUpdatingFromFirebase = false;
+      }
+    });
+
     // Load logs from Firebase
     log = await loadLogsFromFirebase();
 
@@ -365,16 +393,24 @@ async function initApp() {
       // Don't update if we're the one currently drawing
       if (isDrawingLocally) return;
 
-      if (drawState) {
-        // A draw is pending - show it to all users
-        displayDrawResult(drawState.name, drawState.quote);
-      } else {
+      if (drawState && drawState.timestamp) {
+        // Check if this is a new draw (different timestamp)
+        const drawTimestamp = drawState.timestamp?.toMillis?.() || 0;
+
+        if (drawTimestamp !== lastDrawTimestamp) {
+          lastDrawTimestamp = drawTimestamp;
+
+          // A draw is pending - show it to all users
+          displayDrawResult(drawState.name, drawState.quote);
+        }
+      } else if (!drawState) {
         // Draw was confirmed or cleared - hide the confirmation button
         const confirmBtn = document.getElementById('btnConfirm');
         if (confirmBtn) {
           confirmBtn.style.display = 'none';
         }
         pendingConfirmation = null;
+        lastDrawTimestamp = null;
       }
     });
   } else {
