@@ -16,6 +16,7 @@ let participants = JSON.parse(localStorage.getItem(STORAGE_KEY_P) || 'null') || 
 let log = []; // Will be loaded from Firebase
 let pendingConfirmation = null; // Stores the name waiting for confirmation
 let firebaseInitialized = false;
+let isDrawingLocally = false; // Flag to prevent showing own draw twice
 
 // ── Persistence ────────────────────────────────────────────────────────────
 function save() {
@@ -111,24 +112,44 @@ function drawParticipant() {
     count++;
   }, 80);
 
-  setTimeout(() => {
+  isDrawingLocally = true; // Mark that we're drawing locally
+
+  setTimeout(async () => {
     clearInterval(interval);
     spinner.classList.remove('active');
 
     const chosen = pool[Math.floor(Math.random() * pool.length)].name;
     const quote  = QUOTES[Math.floor(Math.random() * QUOTES.length)];
 
-    nameEl.style.opacity = '';
-    nameEl.style.transform = '';
-    nameEl.textContent = chosen;
-    nameEl.classList.add('revealed','flash');
-    subEl.textContent  = quote;
-    subEl.classList.add('revealed');
+    // Show result locally
+    displayDrawResult(chosen, quote);
 
     btn.disabled = false;
-    pendingConfirmation = chosen;
-    confirmBtn.style.display = 'block';
+
+    // Save to Firebase so all users see it
+    if (firebaseInitialized) {
+      await saveCurrentDraw(chosen, quote);
+    }
+
+    isDrawingLocally = false; // Reset flag
   }, 1400);
+}
+
+// Helper function to display draw result
+function displayDrawResult(chosen, quote) {
+  const nameEl = document.getElementById('resultName');
+  const subEl = document.getElementById('resultSub');
+  const confirmBtn = document.getElementById('btnConfirm');
+
+  nameEl.style.opacity = '';
+  nameEl.style.transform = '';
+  nameEl.textContent = chosen;
+  nameEl.classList.add('revealed','flash');
+  subEl.textContent = quote;
+  subEl.classList.add('revealed');
+
+  pendingConfirmation = chosen;
+  confirmBtn.style.display = 'block';
 }
 
 // ── Confirmation ───────────────────────────────────────────────────────────
@@ -159,8 +180,11 @@ async function confirmSpeech() {
   // Save to Firebase
   if (firebaseInitialized) {
     await saveLogToFirebase(newEntry);
+    // Clear the current draw state after confirmation
+    await clearCurrentDraw();
   }
 
+  // Hide confirm button and reset UI
   document.getElementById('btnConfirm').style.display = 'none';
   pendingConfirmation = null;
 }
@@ -264,11 +288,29 @@ async function initApp() {
     // Load logs from Firebase
     log = await loadLogsFromFirebase();
 
-    // Subscribe to real-time updates
+    // Subscribe to real-time updates on logs
     subscribeToLogs((updatedLogs) => {
       log = updatedLogs;
       renderLog();
       renderParticipants(); // Update percentages
+    });
+
+    // Subscribe to real-time updates on current draw state
+    subscribeToCurrentDraw((drawState) => {
+      // Don't update if we're the one currently drawing
+      if (isDrawingLocally) return;
+
+      if (drawState) {
+        // A draw is pending - show it to all users
+        displayDrawResult(drawState.name, drawState.quote);
+      } else {
+        // Draw was confirmed or cleared - hide the confirmation button
+        const confirmBtn = document.getElementById('btnConfirm');
+        if (confirmBtn) {
+          confirmBtn.style.display = 'none';
+        }
+        pendingConfirmation = null;
+      }
     });
   } else {
     console.warn('Firebase not initialized. Using empty log.');
