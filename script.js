@@ -389,6 +389,52 @@ function clearLog() {
   }
 }
 
+// Timeout old results
+let drawExpiryTimeout = null; // référence au timeout actif
+const DRAW_EXPIRY_MS = 10 * 60 * 1000; // 10 minutes
+
+subscribeToCurrentDraw((drawState) => {
+  // Annule toujours le timeout précédent
+  if (drawExpiryTimeout) {
+    clearTimeout(drawExpiryTimeout);
+    drawExpiryTimeout = null;
+  }
+
+  if (drawState && drawState.timestamp) {
+    const drawTimestamp = drawState.timestamp?.toMillis
+      ? drawState.timestamp.toMillis()
+      : drawState.timestamp;
+
+    if (lastDrawTimestamp === null || drawTimestamp !== lastDrawTimestamp) {
+      lastDrawTimestamp = drawTimestamp;
+
+      if (drawState.sessionId !== mySessionId) {
+        simulateRouletteAnimation(drawState.name, drawState.quote);
+      }
+    }
+
+    // Calcule le temps restant avant expiration (gère les reconnexions en cours de route)
+    const elapsed = Date.now() - drawTimestamp;
+    const remaining = DRAW_EXPIRY_MS - elapsed;
+
+    if (remaining <= 0) {
+      // Déjà expiré (ex: reconnexion après 10+ min)
+      if (firebaseInitialized) clearCurrentDraw();
+    } else {
+      // Programme le nettoyage automatique
+      drawExpiryTimeout = setTimeout(async () => {
+        console.log('Draw expired after 10 minutes — auto-clearing');
+        if (firebaseInitialized) await clearCurrentDraw();
+        // resetResultDisplay() sera appelé automatiquement
+        // via le listener subscribeToCurrentDraw quand Firebase retourne null
+      }, remaining);
+    }
+
+  } else if (drawState === null) {
+    resetResultDisplay();
+  }
+});
+
 // ── Init ───────────────────────────────────────────────────────────────────
 async function initApp() {
   // Initialize Firebase
