@@ -1,7 +1,7 @@
 // ── State ──────────────────────────────────────────────────────────────────
 const STORAGE_KEY_P = 'lotr_daily_participants_v2';
 const STORAGE_KEY_L = 'lotr_daily_log';
-const MAX_LOG_ENTRIES = 10;
+const MAX_LOG_ENTRIES = 100;
 const mySessionId = Math.random().toString(36).substr(2, 9);
 
 const DEFAULT_PARTICIPANTS = [
@@ -35,8 +35,8 @@ const rateLimitState = {
 
 function canPerformAction(actionType) {
   const now = Date.now();
-  const lastTime = rateLimitState[`last${actionType}Time`];
-  const cooldown = RATE_LIMITS[`${actionType.toUpperCase()}_COOLDOWN`];
+  const lastTime = rateLimitState[`last${actionType}Time`] ?? 0;
+  const cooldown = RATE_LIMITS[`${actionType.toUpperCase()}_COOLDOWN`] ?? 0;
 
   return (now - lastTime) >= cooldown;
 }
@@ -47,8 +47,8 @@ function updateActionTime(actionType) {
 
 function getRemainingCooldown(actionType) {
   const now = Date.now();
-  const lastTime = rateLimitState[`last${actionType}Time`];
-  const cooldown = RATE_LIMITS[`${actionType.toUpperCase()}_COOLDOWN`];
+  const lastTime = rateLimitState[`last${actionType}Time`] ?? 0; // ← 0 par défaut si undefined
+  const cooldown = RATE_LIMITS[`${actionType.toUpperCase()}_COOLDOWN`] ?? 0; // ← idem
   const remaining = cooldown - (now - lastTime);
 
   return Math.max(0, Math.ceil(remaining / 1000));
