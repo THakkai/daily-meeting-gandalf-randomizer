@@ -214,6 +214,41 @@ function displayDrawResult(chosen, quote) {
   confirmBtn.style.display = 'block';
 }
 
+// Simulate roulette animation for remote users
+function simulateRouletteAnimation(finalName, finalQuote) {
+  const pool = participants.filter(p => p.active);
+  if (pool.length === 0) return;
+
+  const nameEl = document.getElementById('resultName');
+  const subEl = document.getElementById('resultSub');
+  const spinner = document.getElementById('spinningRune');
+  const confirmBtn = document.getElementById('btnConfirm');
+
+  // Reset display
+  nameEl.classList.remove('revealed','flash');
+  subEl.classList.remove('revealed');
+  nameEl.textContent = '';
+  subEl.textContent = '';
+  spinner.classList.add('active');
+  confirmBtn.style.display = 'none';
+
+  const RUNES = ['⚗','⚔','🌙','⭐','🔮','💎','🌿','⚙'];
+  let count = 0;
+  const interval = setInterval(() => {
+    nameEl.textContent = pool[Math.floor(Math.random() * pool.length)].name;
+    nameEl.style.opacity = '0.4';
+    nameEl.style.transform = 'none';
+    spinner.textContent = RUNES[count % RUNES.length];
+    count++;
+  }, 80);
+
+  setTimeout(() => {
+    clearInterval(interval);
+    spinner.classList.remove('active');
+    displayDrawResult(finalName, finalQuote);
+  }, 1400);
+}
+
 // ── Confirmation ───────────────────────────────────────────────────────────
 async function confirmSpeech() {
   if (!pendingConfirmation) return;
@@ -410,7 +445,8 @@ async function initApp() {
 
           // Show the draw only if it was initiated by another session
           if (drawState.sessionId !== mySessionId) {
-            displayDrawResult(drawState.name, drawState.quote);
+            // Trigger animation for remote users instead of directly showing result
+            simulateRouletteAnimation(drawState.name, drawState.quote);
           }
         }
       } else if (drawState === null) {
