@@ -34,7 +34,13 @@ Pour une utilisation simple avec faible traffic, vous pouvez utiliser ces règle
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    // Logs collection - read/write access
     match /logs/{logId} {
+      allow read, write: true;
+    }
+
+    // State collection for collaborative features
+    match /state/{document} {
       allow read, write: true;
     }
   }
@@ -67,10 +73,23 @@ Une fois configuré, l'application :
 - ✅ Sauvegarde automatiquement les logs dans Firebase
 - ✅ Charge les logs au démarrage
 - ✅ Met à jour en temps réel avec les changements
+- ✅ **Synchronisation collaborative en temps réel** - tous les utilisateurs voient le tirage instantanément
+- ✅ **N'importe quel utilisateur peut valider** - la prise de parole peut être confirmée par n'importe quel participant
 - ✅ Garde les participants dans localStorage (stockage local)
+
+### Collaboration en temps réel
+
+L'application utilise Firebase Firestore avec `onSnapshot` pour synchroniser en temps réel :
+
+1. **Tirage partagé** : Quand un utilisateur lance un tirage, tous les utilisateurs connectés voient immédiatement le résultat
+2. **Confirmation collaborative** : N'importe quel utilisateur peut cliquer sur "Confirmer la prise de parole"
+3. **Mises à jour instantanées** : Les logs sont synchronisés en temps réel entre tous les clients
+
+Cela permet à une équipe de voir le même écran même si plusieurs personnes ont l'application ouverte.
 
 ## Structure des données
 
+### Collection `logs`
 Les logs sont stockés dans la collection `logs` avec la structure suivante :
 
 ```javascript
@@ -81,6 +100,22 @@ Les logs sont stockés dans la collection `logs` avec la structure suivante :
   timestamp: Firestore.Timestamp
 }
 ```
+
+### Collection `state`
+L'état actuel du tirage (en attente de confirmation) est stocké dans `state/current_draw` :
+
+```javascript
+{
+  name: "Nom du participant tiré",
+  quote: "Citation de Gandalf",
+  timestamp: Firestore.Timestamp
+}
+```
+
+Ce document est :
+- **Créé** quand un utilisateur lance un tirage
+- **Supprimé** quand n'importe quel utilisateur confirme la prise de parole
+- **Écouté en temps réel** par tous les clients connectés via `onSnapshot`
 
 ## Dépannage
 
