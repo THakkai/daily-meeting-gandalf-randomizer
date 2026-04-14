@@ -172,7 +172,7 @@ function drawParticipant() {
     const chosen = pool[Math.floor(Math.random() * pool.length)].name;
     const quote  = QUOTES[Math.floor(Math.random() * QUOTES.length)];
 
-    // Show result locally
+    // Show result locally first
     displayDrawResult(chosen, quote);
 
     btn.disabled = false;
@@ -180,9 +180,11 @@ function drawParticipant() {
     // Save to Firebase so all users see it
     if (firebaseInitialized) {
       await saveCurrentDraw(chosen, quote);
+      // Note: We don't set lastDrawTimestamp here because the Firebase listener
+      // will handle it when the document is created with a server timestamp
     }
 
-    isDrawingLocally = false; // Reset flag
+    isDrawingLocally = false; // Reset flag after Firebase save
   }, 1400);
 }
 
@@ -245,9 +247,11 @@ async function confirmSpeech() {
     await clearCurrentDraw();
   }
 
-  // Hide confirm button and reset UI
-  document.getElementById('btnConfirm').style.display = 'none';
+  // Hide confirm button and reset UI - do this after clearing Firebase state
+  const confirmBtn = document.getElementById('btnConfirm');
+  confirmBtn.style.display = 'none';
   pendingConfirmation = null;
+  lastDrawTimestamp = null;
 }
 
 // ── Participants ───────────────────────────────────────────────────────────
@@ -390,18 +394,21 @@ async function initApp() {
 
     // Subscribe to real-time updates on current draw state
     subscribeToCurrentDraw((drawState) => {
-      // Don't update if we're the one currently drawing
-      if (isDrawingLocally) return;
-
       if (drawState && drawState.timestamp) {
-        // Check if this is a new draw (different timestamp)
-        const drawTimestamp = drawState.timestamp?.toMillis?.() || 0;
+        // Get timestamp value (handle Firestore Timestamp object)
+        const drawTimestamp = drawState.timestamp?.toMillis ? drawState.timestamp.toMillis() : drawState.timestamp;
 
-        if (drawTimestamp !== lastDrawTimestamp) {
-          lastDrawTimestamp = drawTimestamp;
-
-          // A draw is pending - show it to all users
-          displayDrawResult(drawState.name, drawState.quote);
+        // Only update if this is a new draw we haven't seen before
+        if (lastDrawTimestamp === null || drawTimestamp !== lastDrawTimestamp) {
+          // Don't show the draw twice to the user who initiated it
+          if (!isDrawingLocally) {
+            lastDrawTimestamp = drawTimestamp;
+            // A draw is pending - show it to all users (except the one drawing)
+            displayDrawResult(drawState.name, drawState.quote);
+          } else {
+            // We're drawing locally, just update the timestamp
+            lastDrawTimestamp = drawTimestamp;
+          }
         }
       } else if (!drawState) {
         // Draw was confirmed or cleared - hide the confirmation button
