@@ -13,13 +13,50 @@ const DEFAULT_PARTICIPANTS = [
 ];
 
 let participants = JSON.parse(localStorage.getItem(STORAGE_KEY_P) || 'null') || DEFAULT_PARTICIPANTS.map(p=>({...p}));
-let log = JSON.parse(localStorage.getItem(STORAGE_KEY_L) || '[]');
+let log = []; // Will be loaded from Firebase
 let pendingConfirmation = null; // Stores the name waiting for confirmation
+let firebaseInitialized = false;
+let isDrawingLocally = false; // Flag to prevent showing own draw twice
+
+// ── Rate Limiting (Anti-bot protection) ────────────────────────────────────
+const RATE_LIMITS = {
+  DRAW_COOLDOWN: 5000,        // 5 seconds between draws
+  CONFIRM_COOLDOWN: 2000,     // 2 seconds between confirmations
+  CLEAR_LOG_COOLDOWN: 10000,  // 10 seconds between log clears
+};
+
+const rateLimitState = {
+  lastDrawTime: 0,
+  lastConfirmTime: 0,
+  lastClearLogTime: 0,
+};
+
+function canPerformAction(actionType) {
+  const now = Date.now();
+  const lastTime = rateLimitState[`last${actionType}Time`];
+  const cooldown = RATE_LIMITS[`${actionType.toUpperCase()}_COOLDOWN`];
+
+  return (now - lastTime) >= cooldown;
+}
+
+function updateActionTime(actionType) {
+  rateLimitState[`last${actionType}Time`] = Date.now();
+}
+
+function getRemainingCooldown(actionType) {
+  const now = Date.now();
+  const lastTime = rateLimitState[`last${actionType}Time`];
+  const cooldown = RATE_LIMITS[`${actionType.toUpperCase()}_COOLDOWN`];
+  const remaining = cooldown - (now - lastTime);
+
+  return Math.max(0, Math.ceil(remaining / 1000));
+}
 
 // ── Persistence ────────────────────────────────────────────────────────────
 function save() {
+  // Save participants to localStorage
   localStorage.setItem(STORAGE_KEY_P, JSON.stringify(participants));
-  localStorage.setItem(STORAGE_KEY_L, JSON.stringify(log));
+  // Logs are now saved to Firebase, not localStorage
 }
 
 // ── Tabs ───────────────────────────────────────────────────────────────────
@@ -78,12 +115,22 @@ const QUOTES = [
 ];
 
 function drawParticipant() {
+  // Rate limiting check
+  if (!canPerformAction('Draw')) {
+    const remaining = getRemainingCooldown('Draw');
+    alert(`Veuillez patienter ${remaining} seconde${remaining > 1 ? 's' : ''} avant de relancer le tirage.\n\nCette limite protège contre les abus.`);
+    return;
+  }
+
   const pool = participants.filter(p => p.active);
   if (pool.length === 0) {
     document.getElementById('warningText').style.display = 'block';
     return;
   }
   document.getElementById('warningText').style.display = 'none';
+
+  // Update rate limit timestamp
+  updateActionTime('Draw');
 
   const btn = document.getElementById('btnDraw');
   const nameEl = document.getElementById('resultName');
@@ -109,32 +156,65 @@ function drawParticipant() {
     count++;
   }, 80);
 
-  setTimeout(() => {
+  isDrawingLocally = true; // Mark that we're drawing locally
+
+  setTimeout(async () => {
     clearInterval(interval);
     spinner.classList.remove('active');
 
     const chosen = pool[Math.floor(Math.random() * pool.length)].name;
     const quote  = QUOTES[Math.floor(Math.random() * QUOTES.length)];
 
-    nameEl.style.opacity = '';
-    nameEl.style.transform = '';
-    nameEl.textContent = chosen;
-    nameEl.classList.add('revealed','flash');
-    subEl.textContent  = quote;
-    subEl.classList.add('revealed');
+    // Show result locally
+    displayDrawResult(chosen, quote);
 
     btn.disabled = false;
-    pendingConfirmation = chosen;
-    confirmBtn.style.display = 'block';
+
+    // Save to Firebase so all users see it
+    if (firebaseInitialized) {
+      await saveCurrentDraw(chosen, quote);
+    }
+
+    isDrawingLocally = false; // Reset flag
   }, 1400);
 }
 
+// Helper function to display draw result
+function displayDrawResult(chosen, quote) {
+  const nameEl = document.getElementById('resultName');
+  const subEl = document.getElementById('resultSub');
+  const confirmBtn = document.getElementById('btnConfirm');
+
+  nameEl.style.opacity = '';
+  nameEl.style.transform = '';
+  nameEl.textContent = chosen;
+  nameEl.classList.add('revealed','flash');
+  subEl.textContent = quote;
+  subEl.classList.add('revealed');
+
+  pendingConfirmation = chosen;
+  confirmBtn.style.display = 'block';
+}
+
 // ── Confirmation ───────────────────────────────────────────────────────────
-function confirmSpeech() {
+async function confirmSpeech() {
   if (!pendingConfirmation) return;
 
+  // Rate limiting check
+  if (!canPerformAction('Confirm')) {
+    const remaining = getRemainingCooldown('Confirm');
+    alert(`Veuillez patienter ${remaining} seconde${remaining > 1 ? 's' : ''} avant de confirmer à nouveau.\n\nCette limite protège contre les abus.`);
+    return;
+  }
+
+  // Update rate limit timestamp
+  updateActionTime('Confirm');
+
   const now = new Date();
-  log.unshift({ name: pendingConfirmation, date: formatDate(now), time: formatTime(now) });
+  const newEntry = { name: pendingConfirmation, date: formatDate(now), time: formatTime(now) };
+
+  // Add to local log array first for immediate UI update
+  log.unshift(newEntry);
 
   // Limit log to 10 entries
   //if (log.length > MAX_LOG_ENTRIES) {
@@ -151,6 +231,14 @@ function confirmSpeech() {
   renderLog();
   renderParticipants();
 
+  // Save to Firebase
+  if (firebaseInitialized) {
+    await saveLogToFirebase(newEntry);
+    // Clear the current draw state after confirmation
+    await clearCurrentDraw();
+  }
+
+  // Hide confirm button and reset UI
   document.getElementById('btnConfirm').style.display = 'none';
   pendingConfirmation = null;
 }
@@ -233,13 +321,70 @@ function renderLog() {
 }
 
 function clearLog() {
+  // Rate limiting check
+  if (!canPerformAction('ClearLog')) {
+    const remaining = getRemainingCooldown('ClearLog');
+    alert(`Veuillez patienter ${remaining} seconde${remaining > 1 ? 's' : ''} avant d'effacer à nouveau le parchemin.\n\nCette limite protège contre les abus.`);
+    return;
+  }
+
   if (!confirm('Effacer tout le parchemin des désignés ?')) return;
+
+  // Update rate limit timestamp
+  updateActionTime('ClearLog');
+
   log = [];
   save();
   renderLog();
   renderParticipants(); // Update percentages
+
+  // Clear from Firebase
+  if (firebaseInitialized) {
+    clearLogsFromFirebase();
+  }
 }
 
 // ── Init ───────────────────────────────────────────────────────────────────
-renderParticipants();
-renderLog();
+async function initApp() {
+  // Initialize Firebase
+  firebaseInitialized = initFirebase();
+
+  if (firebaseInitialized) {
+    // Load logs from Firebase
+    log = await loadLogsFromFirebase();
+
+    // Subscribe to real-time updates on logs
+    subscribeToLogs((updatedLogs) => {
+      log = updatedLogs;
+      renderLog();
+      renderParticipants(); // Update percentages
+    });
+
+    // Subscribe to real-time updates on current draw state
+    subscribeToCurrentDraw((drawState) => {
+      // Don't update if we're the one currently drawing
+      if (isDrawingLocally) return;
+
+      if (drawState) {
+        // A draw is pending - show it to all users
+        displayDrawResult(drawState.name, drawState.quote);
+      } else {
+        // Draw was confirmed or cleared - hide the confirmation button
+        const confirmBtn = document.getElementById('btnConfirm');
+        if (confirmBtn) {
+          confirmBtn.style.display = 'none';
+        }
+        pendingConfirmation = null;
+      }
+    });
+  } else {
+    console.warn('Firebase not initialized. Using empty log.');
+  }
+
+  // Render initial UI
+  renderParticipants();
+  renderLog();
+}
+
+// Start the application
+initApp();
