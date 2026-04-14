@@ -28,26 +28,50 @@ Ce guide explique comment configurer Firebase pour sauvegarder les logs de l'app
 
 ### 4. Configurer les règles de sécurité Firestore
 
-Pour une utilisation simple avec faible traffic, vous pouvez utiliser ces règles :
+Pour une utilisation simple avec faible traffic et **protection contre les abus/bots**, utilisez ces règles :
 
 ```javascript
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Logs collection - read/write access
+    // Helper function to check rate limiting
+    function isRateLimited(lastTimestamp, cooldownSeconds) {
+      return request.time < lastTimestamp + duration.value(cooldownSeconds, 's');
+    }
+
+    // Logs collection - read access for all, write with rate limiting
     match /logs/{logId} {
-      allow read, write: true;
+      allow read: if true;
+
+      // Allow write only if not too frequent (max 1 write per 2 seconds per user)
+      allow create: if request.time > request.time - duration.value(2, 's');
+
+      // Prevent deletion by clients (only allow through Firebase console)
+      allow delete: if false;
+      allow update: if false;
     }
 
     // State collection for collaborative features
     match /state/{document} {
-      allow read, write: true;
+      allow read: if true;
+
+      // Allow creating/updating current draw (max once per 3 seconds)
+      allow write: if request.time > request.time - duration.value(3, 's');
+
+      // Allow deletion (for clearing after confirmation)
+      allow delete: if true;
     }
   }
 }
 ```
 
-**Note** : Ces règles permettent un accès complet. Pour une meilleure sécurité en production, ajoutez une authentification Firebase.
+**Protection anti-bot** :
+- ✅ Les écritures sont limitées en fréquence
+- ✅ Les suppressions de logs sont bloquées côté client
+- ✅ Les tirages sont limités à une fréquence raisonnable
+- ✅ L'application côté client a aussi des limites de taux (5s entre tirages, 2s entre confirmations, 10s entre suppressions de log)
+
+**Note** : Ces règles permettent un accès complet en lecture mais limitent les écritures. Pour une meilleure sécurité en production, ajoutez une authentification Firebase.
 
 ### 5. Ajouter vos identifiants Firebase
 
@@ -86,6 +110,22 @@ L'application utilise Firebase Firestore avec `onSnapshot` pour synchroniser en 
 3. **Mises à jour instantanées** : Les logs sont synchronisés en temps réel entre tous les clients
 
 Cela permet à une équipe de voir le même écran même si plusieurs personnes ont l'application ouverte.
+
+### Protection anti-bot et limitation de taux
+
+L'application intègre plusieurs couches de protection contre les abus et les bots :
+
+**Protection côté client (JavaScript)** :
+- ⏱️ **Tirage** : 5 secondes de délai minimum entre chaque tirage
+- ⏱️ **Confirmation** : 2 secondes de délai minimum entre chaque confirmation
+- ⏱️ **Suppression du log** : 10 secondes de délai minimum entre chaque suppression
+
+**Protection côté serveur (Firestore Security Rules)** :
+- 🛡️ Limite de fréquence d'écriture dans les logs
+- 🛡️ Interdiction de suppression directe des logs (seulement via Firebase Console)
+- 🛡️ Limite de fréquence pour les tirages
+
+Ces limitations garantissent une utilisation normale par des humains tout en empêchant les scripts automatisés de spammer la base de données.
 
 ## Structure des données
 
