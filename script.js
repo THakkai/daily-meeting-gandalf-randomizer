@@ -137,7 +137,6 @@ const QUOTES = [
 ];
 
 function drawParticipant() {
-  // Rate limiting check
   if (!canPerformAction('Draw')) {
     const remaining = getRemainingCooldown('Draw');
     alert(`Veuillez patienter ${remaining} seconde${remaining > 1 ? 's' : ''} avant de relancer le tirage.\n\nCette limite protège contre les abus.`);
@@ -150,9 +149,14 @@ function drawParticipant() {
     return;
   }
   document.getElementById('warningText').style.display = 'none';
-
-  // Update rate limit timestamp
   updateActionTime('Draw');
+
+  const chosen = pool[Math.floor(Math.random() * pool.length)].name;
+  const quote  = QUOTES[Math.floor(Math.random() * QUOTES.length)];
+
+  if (firebaseInitialized) {
+    saveCurrentDraw(chosen, quote, mySessionId);
+  }
 
   const btn = document.getElementById('btnDraw');
   const nameEl = document.getElementById('resultName');
@@ -178,22 +182,11 @@ function drawParticipant() {
     count++;
   }, 80);
 
-  setTimeout(async () => {
+  setTimeout(() => {
     clearInterval(interval);
     spinner.classList.remove('active');
-
-    const chosen = pool[Math.floor(Math.random() * pool.length)].name;
-    const quote  = QUOTES[Math.floor(Math.random() * QUOTES.length)];
-
-    // Show result locally first
     displayDrawResult(chosen, quote);
-
     btn.disabled = false;
-
-    // Save to Firebase so all other users see it (sessionId prevents double-display)
-    if (firebaseInitialized) {
-      await saveCurrentDraw(chosen, quote, mySessionId);
-    }
   }, 1400);
 }
 
