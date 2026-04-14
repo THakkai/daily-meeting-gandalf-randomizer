@@ -138,13 +138,15 @@ function subscribeToLogs(callback) {
  * Save the current draw result to Firebase (pending confirmation)
  * @param {string} name - The name of the person drawn
  * @param {string} quote - The quote shown
+ * @param {string} sessionId - The ID of the session that initiated the draw
  * @returns {Promise<boolean>} Success status
  */
-async function saveCurrentDraw(name, quote) {
+async function saveCurrentDraw(name, quote, sessionId) {
   try {
     await currentDrawDoc.set({
       name: name,
       quote: quote,
+      sessionId: sessionId || null,
       timestamp: firebase.firestore.FieldValue.serverTimestamp()
     });
     console.log('Current draw saved to Firebase');
@@ -182,6 +184,7 @@ function subscribeToCurrentDraw(callback) {
       callback({
         name: data.name,
         quote: data.quote,
+        sessionId: data.sessionId || null,
         timestamp: data.timestamp
       });
     } else {

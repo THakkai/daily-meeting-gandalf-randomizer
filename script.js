@@ -2,6 +2,7 @@
 const STORAGE_KEY_P = 'lotr_daily_participants_v2';
 const STORAGE_KEY_L = 'lotr_daily_log';
 const MAX_LOG_ENTRIES = 10;
+const mySessionId = Math.random().toString(36).substr(2, 9);
 
 const DEFAULT_PARTICIPANTS = [
   {name:'Arthur',  active:true},
@@ -16,7 +17,6 @@ let participants = JSON.parse(localStorage.getItem(STORAGE_KEY_P) || 'null') || 
 let log = []; // Will be loaded from Firebase
 let pendingConfirmation = null; // Stores the name waiting for confirmation
 let firebaseInitialized = false;
-let isDrawingLocally = false; // Flag to prevent showing own draw twice
 let lastDrawTimestamp = null; // Track the timestamp of the last draw we processed
 let isUpdatingFromFirebase = false; // Flag to prevent circular updates
 
@@ -110,6 +110,21 @@ function getDrawPercentage(name) {
   return Math.round((count / log.length) * 100);
 }
 
+// ── Result display reset ───────────────────────────────────────────────────
+function resetResultDisplay() {
+  const nameEl = document.getElementById('resultName');
+  const subEl = document.getElementById('resultSub');
+  const confirmBtn = document.getElementById('btnConfirm');
+
+  nameEl.classList.remove('revealed', 'flash');
+  subEl.classList.remove('revealed');
+  nameEl.textContent = '???';
+  subEl.textContent = 'Que Gandalf guide votre chemin';
+  if (confirmBtn) confirmBtn.style.display = 'none';
+  pendingConfirmation = null;
+  lastDrawTimestamp = null;
+}
+
 // ── Draw ───────────────────────────────────────────────────────────────────
 const QUOTES = [
   'Portez ce fardeau avec honneur.',
@@ -163,8 +178,6 @@ function drawParticipant() {
     count++;
   }, 80);
 
-  isDrawingLocally = true; // Mark that we're drawing locally
-
   setTimeout(async () => {
     clearInterval(interval);
     spinner.classList.remove('active');
@@ -177,14 +190,10 @@ function drawParticipant() {
 
     btn.disabled = false;
 
-    // Save to Firebase so all users see it
+    // Save to Firebase so all other users see it (sessionId prevents double-display)
     if (firebaseInitialized) {
-      await saveCurrentDraw(chosen, quote);
-      // Note: We don't set lastDrawTimestamp here because the Firebase listener
-      // will handle it when the document is created with a server timestamp
+      await saveCurrentDraw(chosen, quote, mySessionId);
     }
-
-    isDrawingLocally = false; // Reset flag after Firebase save
   }, 1400);
 }
 
@@ -247,11 +256,8 @@ async function confirmSpeech() {
     await clearCurrentDraw();
   }
 
-  // Hide confirm button and reset UI - do this after clearing Firebase state
-  const confirmBtn = document.getElementById('btnConfirm');
-  confirmBtn.style.display = 'none';
-  pendingConfirmation = null;
-  lastDrawTimestamp = null;
+  // Reset the result display for the confirming user
+  resetResultDisplay();
 }
 
 // ── Participants ───────────────────────────────────────────────────────────
@@ -398,26 +404,18 @@ async function initApp() {
         // Get timestamp value (handle Firestore Timestamp object)
         const drawTimestamp = drawState.timestamp?.toMillis ? drawState.timestamp.toMillis() : drawState.timestamp;
 
-        // Only update if this is a new draw we haven't seen before
+        // Only process if this is a new draw we haven't seen before
         if (lastDrawTimestamp === null || drawTimestamp !== lastDrawTimestamp) {
-          // Don't show the draw twice to the user who initiated it
-          if (!isDrawingLocally) {
-            lastDrawTimestamp = drawTimestamp;
-            // A draw is pending - show it to all users (except the one drawing)
+          lastDrawTimestamp = drawTimestamp;
+
+          // Show the draw only if it was initiated by another session
+          if (drawState.sessionId !== mySessionId) {
             displayDrawResult(drawState.name, drawState.quote);
-          } else {
-            // We're drawing locally, just update the timestamp
-            lastDrawTimestamp = drawTimestamp;
           }
         }
-      } else if (!drawState) {
-        // Draw was confirmed or cleared - hide the confirmation button
-        const confirmBtn = document.getElementById('btnConfirm');
-        if (confirmBtn) {
-          confirmBtn.style.display = 'none';
-        }
-        pendingConfirmation = null;
-        lastDrawTimestamp = null;
+      } else if (drawState === null) {
+        // Draw was confirmed or cleared — reset the display for all users
+        resetResultDisplay();
       }
     });
   } else {
