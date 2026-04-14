@@ -18,6 +18,40 @@ let pendingConfirmation = null; // Stores the name waiting for confirmation
 let firebaseInitialized = false;
 let isDrawingLocally = false; // Flag to prevent showing own draw twice
 
+// ── Rate Limiting (Anti-bot protection) ────────────────────────────────────
+const RATE_LIMITS = {
+  DRAW_COOLDOWN: 5000,        // 5 seconds between draws
+  CONFIRM_COOLDOWN: 2000,     // 2 seconds between confirmations
+  CLEAR_LOG_COOLDOWN: 10000,  // 10 seconds between log clears
+};
+
+const rateLimitState = {
+  lastDrawTime: 0,
+  lastConfirmTime: 0,
+  lastClearLogTime: 0,
+};
+
+function canPerformAction(actionType) {
+  const now = Date.now();
+  const lastTime = rateLimitState[`last${actionType}Time`];
+  const cooldown = RATE_LIMITS[`${actionType.toUpperCase()}_COOLDOWN`];
+
+  return (now - lastTime) >= cooldown;
+}
+
+function updateActionTime(actionType) {
+  rateLimitState[`last${actionType}Time`] = Date.now();
+}
+
+function getRemainingCooldown(actionType) {
+  const now = Date.now();
+  const lastTime = rateLimitState[`last${actionType}Time`];
+  const cooldown = RATE_LIMITS[`${actionType.toUpperCase()}_COOLDOWN`];
+  const remaining = cooldown - (now - lastTime);
+
+  return Math.max(0, Math.ceil(remaining / 1000));
+}
+
 // ── Persistence ────────────────────────────────────────────────────────────
 function save() {
   // Save participants to localStorage
@@ -81,12 +115,22 @@ const QUOTES = [
 ];
 
 function drawParticipant() {
+  // Rate limiting check
+  if (!canPerformAction('Draw')) {
+    const remaining = getRemainingCooldown('Draw');
+    alert(`Veuillez patienter ${remaining} seconde${remaining > 1 ? 's' : ''} avant de relancer le tirage.\n\nCette limite protège contre les abus.`);
+    return;
+  }
+
   const pool = participants.filter(p => p.active);
   if (pool.length === 0) {
     document.getElementById('warningText').style.display = 'block';
     return;
   }
   document.getElementById('warningText').style.display = 'none';
+
+  // Update rate limit timestamp
+  updateActionTime('Draw');
 
   const btn = document.getElementById('btnDraw');
   const nameEl = document.getElementById('resultName');
@@ -155,6 +199,16 @@ function displayDrawResult(chosen, quote) {
 // ── Confirmation ───────────────────────────────────────────────────────────
 async function confirmSpeech() {
   if (!pendingConfirmation) return;
+
+  // Rate limiting check
+  if (!canPerformAction('Confirm')) {
+    const remaining = getRemainingCooldown('Confirm');
+    alert(`Veuillez patienter ${remaining} seconde${remaining > 1 ? 's' : ''} avant de confirmer à nouveau.\n\nCette limite protège contre les abus.`);
+    return;
+  }
+
+  // Update rate limit timestamp
+  updateActionTime('Confirm');
 
   const now = new Date();
   const newEntry = { name: pendingConfirmation, date: formatDate(now), time: formatTime(now) };
@@ -267,7 +321,18 @@ function renderLog() {
 }
 
 function clearLog() {
+  // Rate limiting check
+  if (!canPerformAction('ClearLog')) {
+    const remaining = getRemainingCooldown('ClearLog');
+    alert(`Veuillez patienter ${remaining} seconde${remaining > 1 ? 's' : ''} avant d'effacer à nouveau le parchemin.\n\nCette limite protège contre les abus.`);
+    return;
+  }
+
   if (!confirm('Effacer tout le parchemin des désignés ?')) return;
+
+  // Update rate limit timestamp
+  updateActionTime('ClearLog');
+
   log = [];
   save();
   renderLog();
